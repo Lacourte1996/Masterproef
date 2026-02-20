@@ -1,0 +1,58 @@
+install.packages("tidyverse")
+install.packages("readxl")
+install.packages("janitor")
+install.packages("stringr")
+install.packages("broom")
+install.packages("survival")
+install.packages("censReg")
+
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(stringr)
+library(broom)
+library(survival)  # provides Surv()
+library(censReg)   # alternative Tobit
+
+
+df_raw <- read_excel("Phone_R.xlsx", sheet = 1)
+
+df <- df_raw %>%
+  clean_names() %>%
+  mutate(across(where(is.character), ~ str_squish(.x))) %>%
+  # ensure numeric
+  mutate(load = readr::parse_double(as.character(load), na = c("", "NA")))
+
+LOD <- 300
+
+df_cens <- df %>%
+  mutate(
+    left  = if_else(load < LOD, load, LOD),
+    right = if_else(load < LOD, load, Inf),
+    # factors (set refs if you like)
+    c_d = factor(c_d),
+    frequency = factor(frequency),
+    gender = factor(gender),
+    master = factor(master)
+  )
+
+# Set reference categories
+df_cens$master    <- relevel(df_cens$master, ref = "1ste")
+df_cens$c_d       <- relevel(df_cens$c_d, ref = "niet gereinigd of gedesinfecteerd")
+df_cens$frequency <- relevel(df_cens$frequency, ref = "nooit")
+df_cens$gender    <- relevel(df_cens$gender, ref = "vrouw")
+
+Y <- with(df_cens, Surv(left, right, type = "interval2"))
+
+fit_surv <- survreg(
+  Y ~ c_d + frequency + gender + master,
+  data = df_cens,
+  dist = "gaussian"
+)
+summary(fit_surv)
+
+library(broom)
+
+tidy(fit_surv) %>%
+  select(term, estimate, std.error, statistic, p.value)
+
